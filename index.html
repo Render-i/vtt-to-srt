@@ -1,0 +1,233 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VTT to SRT Converter (Mobile)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 90%;
+            margin: 20px auto;
+            padding: 10px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        h1 {
+            text-align: center;
+            font-size: 1.5em;
+        }
+        input[type="file"], textarea {
+            width: 100%;
+            margin: 10px 0;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 150px;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            margin: 5px 0;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background-color: #f8f8f8;
+            padding: 10px;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 14px;
+        }
+        .error {
+            color: red;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>VTT to SRT Converter</h1>
+    <p>Upload a VTT file or paste VTT content to convert to SRT format.</p>
+    
+    <h2>Option 1: Upload VTT File</h2>
+    <input type="file" id="vttInput" accept=".vtt">
+    <button onclick="convertVttToSrtFromFile()" id="convertButton" disabled>Convert File to SRT</button>
+    
+    <h2>Option 2: Paste VTT Content</h2>
+    <textarea id="vttTextInput" placeholder="Paste your VTT content here (e.g., WEBVTT...)"></textarea>
+    <button onclick="convertVttToSrtFromText()">Convert Text to SRT</button>
+    
+    <h2>Output:</h2>
+    <div class="output" id="srtOutput"></div>
+    <button onclick="downloadSrt()" id="downloadButton" disabled>Download SRT</button>
+    <div class="error" id="errorMessage"></div>
+
+    <script>
+        let srtContent = '';
+
+        // Enable convert button when a file is selected
+        document.getElementById('vttInput').addEventListener('change', function() {
+            const file = this.files[0];
+            document.getElementById('convertButton').disabled = !file;
+            document.getElementById('errorMessage').textContent = '';
+            document.getElementById('srtOutput').textContent = '';
+            srtContent = '';
+            document.getElementById('downloadButton').disabled = true;
+        });
+
+        function convertVttToSrtFromFile() {
+            const fileInput = document.getElementById('vttInput');
+            const errorMessage = document.getElementById('errorMessage');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                errorMessage.textContent = 'Please upload a VTT file.';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const vttInput = e.target.result;
+                    srtContent = convertVttToSrt(vttInput);
+                    document.getElementById('srtOutput').textContent = srtContent;
+                    document.getElementById('downloadButton').disabled = false;
+                    errorMessage.textContent = '';
+                } catch (err) {
+                    errorMessage.textContent = 'Error processing file: ' + err.message;
+                }
+            };
+
+            reader.onerror = function() {
+                errorMessage.textContent = 'Error reading the file. Ensure it is a valid VTT file.';
+            };
+
+            reader.readAsText(file);
+        }
+
+        function convertVttToSrtFromText() {
+            const vttInput = document.getElementById('vttTextInput').value;
+            const errorMessage = document.getElementById('errorMessage');
+
+            if (!vttInput.trim()) {
+                errorMessage.textContent = 'Please paste VTT content.';
+                return;
+            }
+
+            try {
+                srtContent = convertVttToSrt(vttInput);
+                document.getElementById('srtOutput').textContent = srtContent;
+                document.getElementById('downloadButton').disabled = false;
+                errorMessage.textContent = '';
+            } catch (err) {
+                errorMessage.textContent = 'Error processing VTT content: ' + err.message;
+            }
+        }
+
+        function convertVttToSrt(vttInput) {
+            let lines = vttInput.split('\n');
+            
+            // Remove WEBVTT header and empty lines
+            if (lines[0].trim() === 'WEBVTT') {
+                lines.shift();
+            }
+            lines = lines.filter(line => line.trim() !== '');
+
+            let srtOutput = '';
+            let subtitleIndex = 1;
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+                
+                // Check if the line is a timestamp
+                if (line.includes('-->')) {
+                    // Replace period with comma in timestamps
+                    line = line.replace(/\./g, ',');
+                    srtOutput += `${subtitleIndex}\n${line}\n`;
+                    
+                    // Add the subtitle text (next line(s) until next timestamp or empty line)
+                    i++;
+                    while (i < lines.length && !lines[i].includes('-->') && lines[i].trim() !== '') {
+                        srtOutput += `${lines[i]}\n`;
+                        i++;
+                    }
+                    srtOutput += '\n';
+                    subtitleIndex++;
+                    i--; // Step back to process the next line correctly
+                }
+            }
+
+            if (!srtOutput) {
+                throw new Error('No valid subtitle data found in the input.');
+            }
+
+            return srtOutput;
+        }
+
+        function downloadSrt() {
+            if (!srtContent) {
+                document.getElementById('errorMessage').textContent = 'No SRT content to download.';
+                return;
+            }
+
+            const blob = new Blob([srtContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'converted.srt';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
